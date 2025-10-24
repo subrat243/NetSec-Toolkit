@@ -1,188 +1,144 @@
 #!/usr/bin/env python3
 import time
 import psutil
-import speedtest
 import requests
 from ping3 import ping
-import matplotlib.pyplot as plt
 from datetime import datetime
 import csv
 import os
+import argparse
 
 class NetworkMonitor:
-    def __init__(self, interval=5, output_file="network_stats.csv"):
+    def __init__(self, interval=5, output_file="network_stats.csv", pps_threshold=1000, ping_target="8.8.8.8", http_target="https://www.google.com"):
         self.interval = interval
         self.output_file = output_file
         self.headers_written = False
-        
+        self.last_stats = None
+        # --- IMPROVEMENT: Alerting and Configuration ---
+        self.pps_threshold = pps_threshold
+        self.ping_target = ping_target
+        self.http_target = http_target
+
     def get_network_stats(self):
-        """Collect various network statistics"""
-        stats = {
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'bytes_sent': psutil.net_io_counters().bytes_sent,
-            'bytes_recv': psutil.net_io_counters().bytes_recv,
-            'packets_sent': psutil.net_io_counters().packets_sent,
-            'packets_recv': psutil.net_io_counters().packets_recv,
-            'err_in': psutil.net_io_counters().errin,
-            'err_out': psutil.net_io_counters().errout,
-            'drop_in': psutil.net_io_counters().dropin,
-            'drop_out': psutil.net_io_counters().dropout
+        """Collects cumulative network statistics from psutil."""
+        io = psutil.net_io_counters()
+        return {
+            'timestamp': time.time(),
+            'bytes_sent': io.bytes_sent, 'bytes_recv': io.bytes_recv,
+            'packets_sent': io.packets_sent, 'packets_recv': io.packets_recv,
+            'err_in': io.errin, 'err_out': io.errout,
+            'drop_in': io.dropin, 'drop_out': io.dropout
         }
-        return stats
-    
-    def check_connectivity(self, target="8.8.8.8"):
-        """Check if we can reach a target (default: Google DNS)"""
-        try:
-            response = ping(target, timeout=2)
-            return response is not None
-        except:
-            return False
-    
-    def measure_latency(self, target="8.8.8.8"):
-        """Measure latency to a target"""
-        try:
-            return ping(target, unit='ms')
-        except:
-            return None
-    
-    def run_speed_test(self):
-        """Run a speed test (this may take some time)"""
-        try:
-            st = speedtest.Speedtest()
-            st.get_best_server()
-            download = st.download() / 1_000_000  # Mbps
-            upload = st.upload() / 1_000_000  # Mbps
-            return download, upload
-        except:
-            return None, None
-    
-    def check_http_service(self, url="https://www.google.com"):
-        """Check if an HTTP service is available"""
-        try:
-            response = requests.get(url, timeout=5)
-            return response.status_code == 200
-        except:
-            return False
-    
-    def save_stats(self, stats):
-        """Save statistics to CSV file"""
+
+    def save_stats(self, stats_to_save):
+        """Saves a dictionary of statistics to the CSV file."""
         file_exists = os.path.isfile(self.output_file)
-        
         with open(self.output_file, 'a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=stats.keys())
+            writer = csv.DictWriter(f, fieldnames=stats_to_save.keys())
             if not file_exists or not self.headers_written:
                 writer.writeheader()
                 self.headers_written = True
-            writer.writerow(stats)
-    
+            # Format timestamp for CSV
+            stats_to_save['timestamp'] = datetime.fromtimestamp(stats_to_save['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+            writer.writerow(stats_to_save)
+
     def monitor(self, duration=3600):
-        """Main monitoring loop"""
+        """Main monitoring loop with rate calculation and alerting."""
         start_time = time.time()
         end_time = start_time + duration
-        
+
         print(f"Starting network monitoring for {duration} seconds...")
-        print("Press Ctrl+C to stop early")
-        
+        print(f"Alerting when incoming PPS > {self.pps_threshold}")
+        print("Press Ctrl+C to stop early.")
+
         try:
             while time.time() < end_time:
-                stats = self.get_network_stats()
+                current_stats = self.get_network_stats()
                 
-                # Add additional metrics
-                stats['connected'] = self.check_connectivity()
-                stats['latency'] = self.measure_latency()
-                stats['http_available'] = self.check_http_service()
+                # --- IMPROVEMENT: Calculate real-time rates ---
+                rates = {}
+                if self.last_stats:
+                    elapsed = current_stats['timestamp'] - self.last_stats['timestamp']
+                    if elapsed > 0:
+                        rates['recv_kbps'] = (current_stats['bytes_recv'] - self.last_stats['bytes_recv']) / elapsed / 1024
+                        sent_kbps = (current_stats['bytes_sent'] - self.last_stats['bytes_sent']) / elapsed / 1024
+                        rates['recv_pps'] = (current_stats['packets_recv'] - self.last_stats['packets_recv']) / elapsed
+                        sent_pps = (current_stats['packets_sent'] - self.last_stats['packets_sent']) / elapsed
                 
-                # Run speed test every 5 minutes (optional as it's slow)
-                if int(time.time() - start_time) % 300 == 0:
-                    download, upload = self.run_speed_test()
-                    stats['download_mbps'] = download
-                    stats['upload_mbps'] = upload
-                
-                # Save and display stats
-                self.save_stats(stats)
-                self.display_stats(stats)
-                
+                # Add other metrics
+                latency = ping(self.ping_target, unit='ms')
+                http_available = self._check_http_service()
+
+                # --- IMPROVEMENT: Check for alerts ---
+                if 'recv_pps' in rates:
+                    self._check_alerts(rates)
+
+                # Combine all data for display and saving
+                display_data = {**current_stats, **rates, 'latency': latency, 'http_available': http_available}
+                self.display_stats(display_data)
+                self.save_stats(display_data)
+
+                self.last_stats = current_stats
                 time.sleep(self.interval)
         except KeyboardInterrupt:
-            print("\nMonitoring stopped by user")
+            print("\nMonitoring stopped by user.")
         
-        print("Monitoring completed")
-    
-    def display_stats(self, stats):
-        """Display current statistics in a readable format"""
-        print(f"\n[{stats['timestamp']}] Network Stats:")
-        print(f"  Data: Sent {stats['bytes_sent']/1024:.1f} KB / Recv {stats['bytes_recv']/1024:.1f} KB")
-        print(f"  Packets: Sent {stats['packets_sent']} / Recv {stats['packets_recv']}")
-        print(f"  Errors: In {stats['err_in']} / Out {stats['err_out']}")
-        print(f"  Drops: In {stats['drop_in']} / Out {stats['drop_out']}")
-        
-        if 'latency' in stats and stats['latency'] is not None:
-            print(f"  Latency: {stats['latency']:.2f} ms")
-        
-        if 'download_mbps' in stats and stats['download_mbps'] is not None:
-            print(f"  Speed: Download {stats['download_mbps']:.2f} Mbps / Upload {stats['upload_mbps']:.2f} Mbps")
-        
-        print(f"  Connectivity: {'Up' if stats['connected'] else 'Down'}")
-        print(f"  HTTP Service: {'Available' if stats['http_available'] else 'Unavailable'}")
-    
-    def generate_report(self):
-        """Generate a report from collected data"""
+        print("Monitoring completed.")
+
+    def _check_http_service(self):
         try:
-            import pandas as pd
-            
-            data = pd.read_csv(self.output_file)
-            
-            # Calculate transfer rates (KB/s)
-            data['time'] = pd.to_datetime(data['timestamp'])
-            data['time_diff'] = data['time'].diff().dt.total_seconds()
-            data['sent_rate'] = (data['bytes_sent'].diff() / data['time_diff']) / 1024
-            data['recv_rate'] = (data['bytes_recv'].diff() / data['time_diff']) / 1024
-            
-            # Plot network activity
-            plt.figure(figsize=(12, 8))
-            
-            plt.subplot(2, 1, 1)
-            plt.plot(data['time'], data['sent_rate'], label='Sent (KB/s)')
-            plt.plot(data['time'], data['recv_rate'], label='Received (KB/s)')
-            plt.title('Network Throughput')
-            plt.ylabel('KB/s')
-            plt.legend()
-            plt.grid()
-            
-            plt.subplot(2, 1, 2)
-            if 'latency' in data.columns:
-                plt.plot(data['time'], data['latency'], 'r-', label='Latency (ms)')
-                plt.title('Network Latency')
-                plt.ylabel('ms')
-                plt.legend()
-                plt.grid()
-            
-            plt.tight_layout()
-            plt.savefig('network_report.png')
-            print("Report generated as network_report.png")
-            
-        except ImportError:
-            print("Pandas and matplotlib are required for report generation")
-        except Exception as e:
-            print(f"Error generating report: {e}")
+            return requests.get(self.http_target, timeout=5).status_code == 200
+        except requests.RequestException:
+            return False
+
+    def _check_alerts(self, rates):
+        """Checks calculated rates against defined thresholds."""
+        if rates['recv_pps'] > self.pps_threshold:
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            alert_msg = (
+                f"\n{'!'*10} HIGH TRAFFIC ALERT @ {timestamp_str} {'!'*10}\n"
+                f"  Incoming packets per second ({rates['recv_pps']:.0f}) exceeded threshold of {self.pps_threshold}\n"
+                f"  This could indicate a potential network scan or a flood attack.\n"
+                f"{'!'*50}"
+            )
+            print(alert_msg)
+
+    def display_stats(self, stats):
+        """Displays current statistics in a readable format."""
+        ts = datetime.fromtimestamp(stats['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+        
+        recv_kbps_str = f"{stats.get('recv_kbps', 0):.2f} KB/s"
+        recv_pps_str = f"{stats.get('recv_pps', 0):.1f} pps"
+        latency_str = f"{stats.get('latency', 0):.2f} ms" if stats.get('latency') is not None else "N/A"
+        connectivity_str = "Up" if stats.get('latency') is not None else "Down"
+        http_str = "Available" if stats.get('http_available') else "Unavailable"
+        
+        print(
+            f"\r[{ts}] | In: {recv_kbps_str} ({recv_pps_str}) | Latency: {latency_str} | "
+            f"Ping: {connectivity_str} | HTTP: {http_str}",
+            end=""
+        )
 
 def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Network Monitoring Tool")
-    parser.add_argument('--interval', type=int, default=5, help='Monitoring interval in seconds')
-    parser.add_argument('--duration', type=int, default=3600, help='Monitoring duration in seconds')
-    parser.add_argument('--output', default="network_stats.csv", help='Output CSV file')
-    parser.add_argument('--report', action='store_true', help='Generate report from existing data')
+    parser = argparse.ArgumentParser(description="Network Monitoring and Alerting Tool")
+    parser.add_argument('-i', '--interval', type=int, default=5, help='Monitoring interval in seconds')
+    parser.add_argument('-d', '--duration', type=int, default=3600, help='Total monitoring duration in seconds')
+    parser.add_argument('-o', '--output', default="network_stats.csv", help='Output CSV file name')
+    # --- IMPROVEMENT: Command-line arguments for thresholds and targets ---
+    parser.add_argument('--pps-threshold', type=int, default=2000, help='Incoming packets-per-second threshold for alerts')
+    parser.add_argument('--ping-target', default="8.8.8.8", help='IP or domain to ping for connectivity checks')
+    parser.add_argument('--http-target', default="https://www.google.com", help='URL to check for HTTP service availability')
     
     args = parser.parse_args()
     
-    monitor = NetworkMonitor(interval=args.interval, output_file=args.output)
-    
-    if args.report:
-        monitor.generate_report()
-    else:
-        monitor.monitor(duration=args.duration)
+    monitor = NetworkMonitor(
+        interval=args.interval, 
+        output_file=args.output,
+        pps_threshold=args.pps_threshold,
+        ping_target=args.ping_target,
+        http_target=args.http_target
+    )
+    monitor.monitor(duration=args.duration)
 
 if __name__ == "__main__":
     main()
