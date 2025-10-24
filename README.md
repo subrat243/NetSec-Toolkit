@@ -1,132 +1,125 @@
-# Network Testing and Monitoring Toolkit
+# Network Stress & Monitoring Suite
 
-## Overview
+This repository contains a suite of Python-based tools for network stress testing and proactive performance monitoring. These tools are designed for security researchers and network administrators to assess network resilience and detect anomalies in real-time.
 
-This toolkit provides two powerful Python scripts for network assessment:
-1. **Network Stress Tester**: A tool to evaluate your network's resilience under various load conditions
-2. **Network Monitor**: A comprehensive monitoring solution to track network performance over time
+## Disclaimer
+
+**This software is intended for educational and ethical purposes only.** Performing stress tests on networks or servers you do not own or have explicit permission to test is illegal. The author is not responsible for any misuse or damage caused by this program. Always act responsibly and within the law.
+
+-----
 
 ## Features
 
-### Network Stress Tester
-- TCP flood attack simulation
-- UDP flood attack simulation
-- HTTP flood attack simulation
-- Internet speed testing (download/upload)
-- Ping latency testing
+### `stress.py` - Advanced Network Stress Tester
 
-### Network Monitor
-- Continuous network statistics collection
-- Bandwidth usage monitoring
-- Latency measurement
-- Internet connectivity checks
-- HTTP service availability testing
-- Automated speed testing
-- CSV data logging
-- Graphical report generation
+  * **High-Performance Floods**: Capable of TCP, UDP, and HTTP flood attacks.
+  * **Real-time Feedback**: Displays live statistics during an attack, including elapsed time, total packets sent, and the current packets-per-second (PPS) rate.
+  * **Multi-threaded**: Utilizes a `ThreadPoolExecutor` for high-performance, concurrent traffic generation.
+  * **Configurable Payloads**: Allows specifying the packet size (in bytes) for UDP floods using the `--size` argument.
+  * **Graceful Shutdown**: Handles `Ctrl+C` (KeyboardInterrupt) to stop attacks cleanly and provide a final summary.
+
+### `monitor.py` - Real-time Network Monitor & Alerter
+
+  * **Real-time Rate Calculation**: Monitors network traffic and calculates current throughput (KB/s) and packet rates (pps) in real-time.
+  * **Threshold-Based Alerting**: Proactively monitors incoming traffic and triggers a console alert if the packet-per-second rate exceeds a user-defined threshold (e.g., `--pps-threshold 2000`).
+  * **Configurable Endpoints**: Allows users to specify the targets for connectivity checks via command-line arguments (`--ping-target` and `--http-target`).
+  * **Actionable Display**: Provides a clean, single-line console output showing the most critical metrics: traffic rates, latency, and service availability.
+  * **Data Logging**: Saves all collected statistics, including rates and timestamps, to a CSV file (e.g., `network_stats.csv`) for later analysis.
+
+-----
 
 ## Installation
 
-1. Clone this repository or download the scripts
-2. Ensure Python 3.6+ is installed
-3. Install required dependencies:
+1.  Clone the repository:
 
-```bash
-pip install <requirements>
-```
+    ```bash
+    git clone <your-repo-url>
+    cd <your-repo-directory>
+    ```
 
-The requirements should installed:
-```
-psutil
-speedtest-cli
-ping3
-requests
-matplotlib
-pandas
-```
+2.  Create and activate a Python virtual environment:
+
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+    ```
+
+3.  Install the required Python packages from `requirements.txt`:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    If you do not have a `requirements.txt`, create one with this content:
+
+    ```
+    requests
+    ping3
+    psutil
+    ```
+
+    Then run `pip install -r requirements.txt`.
+
+-----
 
 ## Usage
 
-### Network Stress Tester
+### `stress.py` - Running Stress Tests
 
-```
-python stress.py <command> [arguments]
-```
+**Note**: This script may require root/administrator privileges to send packets effectively.
 
-**Commands:**
-- `tcp <target_ip> <target_port>` - TCP flood attack
-- `udp <target_ip> <target_port>` - UDP flood attack
-- `http <target_url>` - HTTP flood attack
-- `speedtest` - Run internet speed test
-- `ping <target>` - Ping latency test
+**TCP Flood Attack**
 
-**Options:**
-- `--duration` - Attack duration in seconds (default: 60)
-- `--threads` - Number of threads to use (default: 50)
-- `--count` - Number of pings to send (ping command only)
-
-**Examples:**
 ```bash
-# TCP flood attack
-python stress_tester.py tcp 192.168.1.100 80 --duration 120 --threads 100
-
-# Speed test
-python stress.py speedtest
-
-# Ping test
-python stress.py ping google.com --count 10
+# Usage: python3 stress.py tcp <target_ip> <port> [-d DURATION] [-t THREADS]
+python3 stress.py tcp 192.168.1.100 80 -d 120 -t 100
 ```
 
-### Network Monitor
+**UDP Flood Attack (with custom packet size)**
 
-```
-python monitor.py [options]
-```
-
-**Options:**
-- `--interval` - Monitoring interval in seconds (default: 5)
-- `--duration` - Monitoring duration in seconds (default: 3600)
-- `--output` - Output CSV file (default: "network_stats.csv")
-- `--report` - Generate report from existing data
-
-**Examples:**
 ```bash
-# Monitor for 30 minutes
-python monitor.py --duration 1800
-
-# Monitor with 10-second intervals
-python monitor.py --interval 10
-
-# Generate report from collected data
-python monitor.py --report
+# Usage: python3 stress.py udp <target_ip> <port> [-d DURATION] [-t THREADS] [-s SIZE]
+python3 stress.py udp 192.168.1.100 53 -d 120 -t 100 -s 1400
 ```
 
-## Output
+**HTTP Flood Attack**
 
-### Stress Tester
-- Real-time attack statistics in console
-- Speed test results in Mbps
-- Ping test results with latency measurements
+```bash
+# Usage: python3 stress.py http <target_url> [-d DURATION] [-t THREADS]
+python3 stress.py http https://example.com -d 60 -t 50
+```
 
-### Network Monitor
-- CSV file with timestamped network metrics
-- Optional PNG report with graphs of:
-  - Network throughput (sent/received data)
-  - Latency over time
-- Console output with current statistics
+### `monitor.py` - Monitoring & Alerting
 
-## Legal and Ethical Considerations
+This command will start monitoring, check connectivity to `1.1.1.1`, and trigger an alert if incoming traffic exceeds 2000 packets-per-second.
 
-⚠️ **Important:**  
-- Only use these tools on networks you own or have explicit permission to test
-- Unauthorized network testing may be illegal in your jurisdiction
-- These tools are for educational and legitimate network assessment purposes only
-- The authors assume no liability for misuse of these tools
+```bash
+# Usage: python3 monitor.py [-i INTERVAL] [-d DURATION] [-o OUTPUT.csv] [--pps-threshold PPS] [--ping-target TARGET] [--http-target URL]
 
-## Support
+# Example:
+python3 monitor.py -i 2 -d 3600 -o netlog.csv --pps-threshold 2000 --ping-target 1.1.1.1 --http-target https://my-service.com
+```
 
-For issues or feature requests, please open an issue on the GitHub repository.
+**Example Console Output:**
+
+```
+Starting network monitoring for 3600 seconds...
+Alerting when incoming PPS > 2000
+Press Ctrl+C to stop early.
+[2025-10-24 15:30:12] | In: 120.45 KB/s (85.5 pps) | Latency: 12.34 ms | Ping: Up | HTTP: Available
+```
+
+**Example Alert Output:**
+
+```
+!!!!!!!!!!!!!!!!!! HIGH TRAFFIC ALERT @ 2025-10-24 15:31:18 !!!!!!!!!!!!!!!!!!
+  Incoming packets per second (2345) exceeded threshold of 2000
+  This could indicate a potential network scan or a flood attack.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```
+
+-----
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
